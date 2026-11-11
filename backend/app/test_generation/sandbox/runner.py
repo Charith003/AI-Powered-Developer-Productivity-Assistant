@@ -118,10 +118,14 @@ class DockerSandbox:
                 return execution
             try:
                 execution.junit_xml = self._read_artifact(artifacts_root / "results.xml")
-                execution.coverage_json = self._read_artifact(artifacts_root / "coverage.json")
             except OSError:
                 execution.status = "infrastructure_failure"
                 execution.message = "Sandbox completed without required result artifacts"
+                return execution
+            try:
+                execution.coverage_json = self._read_artifact(artifacts_root / "coverage.json")
+            except OSError:
+                logger.warning("Sandbox did not produce a coverage artifact")
             return execution
 
     def verify_image_digest(self) -> bool:
@@ -176,8 +180,6 @@ class DockerSandbox:
             "none",
             "--memory",
             self.settings.test_sandbox_memory,
-            "--pid",
-            "private",
             "--ipc",
             "private",
             "--memory-swap",
@@ -203,7 +205,7 @@ class DockerSandbox:
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,nodev,size=32m,nr_inodes=2048",
             "--tmpfs",
-            "/workspace:rw,noexec,nosuid,nodev,size=64m,nr_inodes=4096",
+            "/workspace:rw,noexec,nosuid,nodev,size=64m,nr_inodes=4096,mode=1777",
             "--tmpfs",
             "/results:rw,noexec,nosuid,nodev,size=16m,nr_inodes=2048",
             "--mount",
@@ -390,6 +392,11 @@ class DockerSandbox:
                     or "Unable to find image" in err
                     or "Cannot connect to the Docker daemon" in err
                 ):
+                    logger.warning(
+                        "Docker sandbox launch failed with exit %s: %s",
+                        process.returncode,
+                        err.strip()[:500],
+                    )
                     result = SandboxResult(
                         "infrastructure_failure",
                         process.returncode,
@@ -455,29 +462,46 @@ class DockerSandbox:
     ) -> None:
         name = argv[argv.index("--name") + 1]
         pending = {"results.xml", "coverage.json"}
+        last_errors = {}
         while pending and not done.is_set():
             for filename in tuple(pending):
                 try:
                     copied = subprocess.run(
                         [
                             self.docker_path or "docker",
-                            "cp",
-                            f"{name}:/results/{filename}",
-                            str(target / filename),
+                            "exec",
+                            "--user",
+                            "0",
+                            name,
+                            "cat",
+                            f"/results/{filename}",
                         ],
                         stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        capture_output=True,
                         timeout=2,
                         check=False,
                         shell=False,
                     )
-                    if copied.returncode == 0 and (target / filename).is_file():
-                        pending.remove(filename)
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
+                    if copied.returncode == 0:
+                        if len(copied.stdout) > self.settings.test_sandbox_output_bytes:
+                            last_errors[filename] = "artifact exceeded the configured output limit"
+                        else:
+                            (target / filename).write_bytes(copied.stdout)
+                            pending.remove(filename)
+                    else:
+                        last_errors[filename] = copied.stderr.decode("utf-8", "replace").strip()[
+                            :300
+                        ]
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    last_errors[filename] = str(exc)[:300]
             if pending:
                 time.sleep(0.25)
+        for filename in pending:
+            logger.warning(
+                "Could not retrieve sandbox artifact %s before container cleanup: %s",
+                filename,
+                last_errors.get(filename, "artifact was not available"),
+            )
 
     def _read_artifact(self, path: Path) -> str:
         resolved = path.resolve()

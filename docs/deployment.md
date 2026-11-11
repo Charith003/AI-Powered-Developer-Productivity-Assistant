@@ -21,11 +21,11 @@ Push the image to an approved registry and retain the registry's immutable repos
 TEST_SANDBOX_IMAGE=registry.example/devpilot/test-sandbox-python:0.1@sha256:<verified-repository-digest>
 ```
 
-The worker checks Docker's local `RepoDigests` for that repository digest and starts containers with `--pull=never`. A mutable tag alone is rejected. Do not promote an image until `.github/workflows/sandbox-verification.yml` passes and its uploaded image digest and test artifacts have been reviewed. The current development environment cannot build the image; this document intentionally contains no invented digest. Each CI run currently uses an ephemeral local registry and uploads that run's image reference/digest as evidence; release deployment should use a trusted persistent registry.
+The worker checks Docker's local `RepoDigests` for that repository digest and starts containers with `--pull=never`. A mutable tag alone is rejected. The successful [verification run #24](https://github.com/Charith003/AI-Powered-Developer-Productivity-Assistant/actions/runs/43042010217) produced separate runtime and worker image digests: `sha256:a2a9ca4cad5445c79f21ca9120e43ee1617b72213abec037d10accf32f885bd9` and `sha256:28eb4073bfdf1ee0400dc66a363314cff20d3a933666dd05eea0ec265e4ed454`. Both belong to temporary job-local registries and are verification evidence only. Release deployment requires rebuilding/pushing to an approved persistent registry and reviewing that registry's immutable RepoDigest.
 
 ## Docker-enabled verification
 
-The `Sandbox verification` workflow runs on pull requests and manual dispatch using an Ubuntu runner with Docker Engine and a PostgreSQL 16 service. It builds the image, pushes it to a temporary local registry to obtain a real immutable repository digest, verifies image metadata, applies the complete migration chain and an upgrade from revision `0004_test_generation`, then runs backend regression tests, live container probes and real PostgreSQL worker tests. Sanitized JUnit, lifecycle logs, image configuration and digest evidence are uploaded for 14 days. Mandatory integration test failures fail the workflow; the tests are not silently skipped in this job.
+The `Sandbox verification` workflow runs on pull requests and manual dispatch. It separates PostgreSQL migration checks, live Docker sandbox checks, PostgreSQL worker integration, and backend/frontend checks into independent jobs. The two Docker jobs each rebuild the image, push to a temporary local registry, verify the immutable RepoDigest and run their live test suite. A final aggregation job requires every suite to succeed. Sanitized JUnit, runtime logs, image configuration and digest evidence are uploaded for 14 days. A failure in one suite does not prevent the other independent suites from producing evidence.
 
 Manual equivalent after configuring Docker, PostgreSQL and the digest:
 
@@ -38,7 +38,7 @@ DEVPILOT_SANDBOX_RUNTIME=1 DEVPILOT_POSTGRES_INTEGRATION=1 \
   python -m pytest -q -s tests/test_sandbox_runtime.py tests/test_postgres_worker_integration.py
 ```
 
-The runtime probes cover actual Pytest pass/fail/skip/collection behavior, coverage, timeout, output and resource limits, network/filesystem/environment isolation, non-root test execution, cancellation, cleanup, concurrent worker claims and stale-container recovery. Review the evidence and residual Docker host-kernel risk; ordinary Docker containers are not equivalent to a dedicated VM or Firecracker. gVisor is not configured by this project and is not claimed as verified.
+Run #24 passed all 13 actual Docker runtime scenarios and all 4 PostgreSQL worker integration tests. The runtime probes cover Pytest pass/fail/skip/collection behavior, coverage, timeout, output and resource limits, network/filesystem/environment isolation, non-root test execution, cancellation, cleanup, concurrent worker claims and stale-container recovery. Review the evidence and residual Docker host-kernel risk; ordinary Docker containers are not equivalent to a dedicated VM or Firecracker. gVisor is not configured by this project and is not claimed as verified.
 
 ## Local development
 

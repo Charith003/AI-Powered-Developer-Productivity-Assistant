@@ -8,7 +8,7 @@
 ## Phase 1 — Foundation: complete
 - Frontend and backend dependencies are defined; Next.js build and FastAPI startup/test configuration are verified.
 - Health/status endpoints, SQLAlchemy database health check, and Alembic migration framework are implemented.
-- Alembic upgrades a fresh local SQLite test database through the current head (`0007_raw_coverage_artifact`); PostgreSQL remains the production target and needs the new Docker-enabled CI run before verification.
+- Alembic upgrades fresh PostgreSQL and SQLite databases through the current head (`0007_raw_coverage_artifact`). The CI migration suite also verifies upgrade from revision `0004_test_generation` and a populated legacy database.
 
 ## Phase 2 — Authentication and project management: complete
 - Registration, login, profile read/update, refresh rotation, logout, Argon2id password hashing, and signed access tokens are implemented.
@@ -29,12 +29,13 @@
 - MCP is not implemented. Code review service methods provide a transport-independent foundation for a later adapter.
 
 ## Verification performed
-- Backend: `python -m pytest -q` — **26 passed** after the rollback regression test was strengthened. Ruff lint/format passed earlier in the implementation; the final shell's Windows Python launcher pointed to a missing interpreter, so Ruff could not be rerun after the last small edits.
-- Frontend: `npm run lint` and `npm run build` passed for the implemented review and dashboard screens.
-- Analyzer integration tests execute Ruff, ESLint, and the TypeScript compiler in this environment. Other tools report per-review availability; Java/Checkstyle and C/C++ compiler availability are environment-dependent.
-- Migration test upgrades a fresh SQLite database to Alembic head and verifies review schema columns/tables. This confirms local migration behavior, not PostgreSQL connectivity.
-- No live PostgreSQL, Docker, or OpenAI API key was available. Live database/provider integration remains unverified. Analyzer subprocesses have time and output limits, but are not isolated with OS-level CPU/memory/network sandboxing.
-- A non-blocking Starlette/httpx TestClient deprecation warning may be emitted.
+- Latest full verification: [GitHub Actions run #24](https://github.com/Charith003/AI-Powered-Developer-Productivity-Assistant/actions/runs/43042010217) — all five jobs, including evidence aggregation, succeeded.
+- Backend unit suite: **35 passed, 19 skipped**. Live-only Docker and PostgreSQL cases are gated in this suite and were run separately below. Ruff lint and format checks passed.
+- Frontend `npm ci`, `npm run lint`, and `npm run build` passed in CI. Local Windows `npm run lint` and `npm run build` also passed; local `npm ci` was unavailable in the restricted network environment.
+- PostgreSQL migration suite passed for fresh head, downgrade/upgrade from `0004_test_generation`, and populated legacy duplicate-job reconciliation. SQLAlchemy PostgreSQL URLs are converted through `make_url()` before direct psycopg connections; credentials are not logged. The legacy verifier removes temporary databases in `finally`.
+- Live Docker sandbox suite: **13 passed**. Passing evidence covers Pytest pass/fail/skip, syntax/import/empty collection, timeout, cancellation, output limit, memory termination (signal 9 / exit 137), PID limit, network/filesystem/environment isolation, non-root execution, result/coverage parsing, and container cleanup.
+- PostgreSQL worker integration: **4 passed**. It exercised authenticated queue submission, idempotent duplicate submission, ownership checks, atomic competing claims, actual Docker execution, cancellation, stale/orphan recovery, audit events, result persistence, and parsed/raw coverage persistence.
+- A Starlette/httpx TestClient deprecation warning remains non-blocking. No live OpenAI provider key was available; provider smoke testing is outside this sandbox verification workflow.
 
 ## Phase 5 — Automated test generation and isolated execution: in progress
 - Implemented Python/Pytest test generation through the existing structured AI provider, AST-based target/case planning, optional linked Phase 4 regression context, persisted AI usage, safe-input checks, test editing, static syntax/import/assertion/duplicate checks, and authenticated owner-scoped APIs.
@@ -43,19 +44,21 @@
 - Frontend `/test-generator` supports source submission, project selection, generated test editing, validation, queued execution polling, result and coverage display, failure explanation requests, and generation history.
 - Scope is currently Python/Pytest. JS/TS/Jest/Vitest and Java/C/C++ testing are explicitly unsupported. Project-file browsing, artifact object storage, and richer file-level coverage UI remain future work.
 
-## Phase 5.1 — Sandbox verification, hardening and execution completion: in progress
+## Phase 5.1 — Sandbox verification, hardening and execution completion: complete
 - Added migration `0005_execution_reliability`: idempotent active execution per generation enforced in API and by a partial unique index; running jobs expose a persisted cancellation request. Migration `0006_execution_audit_events` stores sanitized queue, claim, container, cancellation and recovery lifecycle evidence. Migration `0007_raw_coverage_artifact` retains bounded raw coverage JSON for owner-scoped comparison with parsed results.
 - The worker verifies the configured tag plus immutable digest against the image's local repository digests before running. Container names are derived from validated execution IDs; cancellation removes the live container and records cleanup confirmation, and stale jobs attempt deterministic orphan removal.
 - Frontend exposes cancellation requests while work is queued/running and shows the pending cancellation state.
-- Added opt-in live Docker scenario tests, PostgreSQL worker integration tests, and `.github/workflows/sandbox-verification.yml`. The workflow builds the image, pushes it to an ephemeral local registry to obtain an immutable repository digest, verifies it, then runs Docker scenarios and PostgreSQL worker tests. It also performs a PostgreSQL upgrade from revision `0004_test_generation`.
-- Docker, Podman, nerdctl, runsc and Firecracker are unavailable locally. The image has not been built here, the CI workflow has not been run, and no sandbox scenario or generated test body has been executed in this environment. Runtime isolation, actual cancellation, timeout/resource enforcement, PostgreSQL worker behavior and recovery therefore remain unverified. No digest or CI result is claimed.
+- Added opt-in live Docker scenario tests, PostgreSQL worker integration tests, and `.github/workflows/sandbox-verification.yml`. Migration checks, runtime checks, worker integration, and backend/frontend checks now run as independent jobs; an aggregate job fails if any mandatory suite fails. Each Docker job independently rebuilds, pushes to a per-job ephemeral local registry, records the returned digest, pulls the immutable RepoDigest reference, verifies that reference, and passes that exact reference to the tests.
+- Expanded PostgreSQL worker integration coverage to submit through the protected FastAPI queue endpoint, verify a repeat request reuses the same active execution, reject a different user's request for the generation, and confirm the queue audit event before real worker execution.
+- Fixed the legacy migration verifier's psycopg connection parsing by converting SQLAlchemy `postgresql+psycopg` URLs to psycopg-compatible `postgresql` URIs through `make_url`, without logging credentials. The verifier now drops its temporary database from a `finally` block and asserts the duplicate-job reconciliation, active-generation index, audit table, and raw coverage column.
+- Replaced the Node 20 based checkout/setup-python/upload-artifact actions with reviewed, commit-pinned Node 24 compatible releases. The workflow's Node setup action is also pinned to a reviewed commit.
+- GitHub Actions run #24 rebuilt both sandbox images, pulled the exact digest-pinned references, verified their immutable `RepoDigests`, executed the real runtime and PostgreSQL worker tests, and completed the aggregate gate successfully. Runtime image digest: `sha256:a2a9ca4cad5445c79f21ca9120e43ee1617b72213abec037d10accf32f885bd9`; worker image digest: `sha256:28eb4073bfdf1ee0400dc66a363314cff20d3a933666dd05eea0ec265e4ed454`. These came from separate ephemeral CI registries and are verification evidence, not production references.
+- Docker and PostgreSQL are unavailable in the local Windows environment; backend and live integration evidence therefore comes from the successful hosted workflow. Local frontend lint/build passed, while lockfile installation was verified in CI.
 
-## Verification and remaining Phase 5 gate
-- Backend: `python -m pytest -q` — **35 passed, 17 skipped**, with one non-blocking Starlette/httpx deprecation warning. The skips are all Docker/PostgreSQL live integration scenarios because the local runtime flags/services are unavailable; they are mandatory and explicitly enabled in the new CI job. SQLite migrations and lifecycle APIs include revision `0007`.
-- Backend Ruff: `ruff check app tests migrations scripts` and `ruff format --check app tests migrations scripts` — passed after formatting the checked Python files.
-- Frontend `npm run lint` and `npm run build` passed. The production build completed compilation, type checking, static generation, and build traces.
-- Docker is not installed and no digest-pinned sandbox image is configured. The sandbox image was not built or run; **zero submitted/generated test cases were actually executed** in this environment. Successful execution, actual worker test counts/coverage, network isolation, quotas, timeout cleanup, and runtime security are **not verified**. Runtime tests are authored but remain unexecuted locally. No live PostgreSQL or OpenAI call was available either; the AI generation test uses a mocked provider and does not claim a live AI response.
-- This phase is not complete until the new Docker-enabled workflow has actually passed and produced a digest and evidence artifacts. Its test code is not verification evidence by itself.
+## Phase 5.1 verification and deployment boundary
+- All mandatory CI verification suites passed in run #24. The memory-limit test records exit 137 after signal 9 and confirms the container was cleaned; the 13 runtime tests and 4 worker integration tests are live evidence, not skipped cases.
+- The temporary `localhost:5000` registry is scoped to each CI job and must never be configured for production. Deployment still requires a separately approved trusted persistent registry, a production image digest, production PostgreSQL, and an operationally restricted worker host.
+- The image digests above identify the artifacts built for that CI run; rebuild and re-review them after any image or build-input change.
 
 ## Exact next development milestone
-Run `.github/workflows/sandbox-verification.yml` on GitHub Actions and fix any real failures. Review the attached digest and evidence artifacts, then configure deployment `TEST_SANDBOX_IMAGE` with a trusted registry image and its verified immutable repository digest. Confirm production PostgreSQL and worker operation before marking Phase 5.1 complete. Only then begin **Phase 6 — repository integration and pull-request workflows**, with authorized Git connections and read-only diff review/test generation.
+Configure a trusted persistent registry and the production `TEST_SANDBOX_IMAGE`, then validate production PostgreSQL and worker operations. After deployment infrastructure is approved, begin **Phase 6 — repository integration and pull-request workflows**, with authorized Git connections and read-only diff review/test generation.

@@ -49,6 +49,9 @@ def main():
     (work / source.parent).mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source_in, work / source)
     shutil.copyfile("/inputs/test_generated.py", work / "test_generated.py")
+    # Pytest and coverage run after dropping to uid 10001. The bounded tmpfs
+    # mount is writable by that UID; keep nested source directories writable too.
+    (work / source.parent).chmod(0o777)
     results = Path("/results")
     results.chmod(0o700)
     source_parent = "." if source.parent == Path(".") else str(source.parent)
@@ -65,11 +68,35 @@ def main():
         ])
     env = {"PATH": os.environ.get("PATH", ""), "HOME": "/tmp", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": f"/workspace/{source_parent}"}
     result = subprocess.run(command, cwd=work, env=env, stdin=subprocess.DEVNULL, shell=False, check=False, preexec_fn=drop_test_privileges)
+    if result.returncode < 0:
+        kill_leftover_test_processes()
+        signal_number = -result.returncode
+        print(f"Sandbox test process terminated by signal {signal_number}", flush=True)
+        return 128 + signal_number
     if not args.collect_only:
         kill_leftover_test_processes()
+        if not Path("/tmp/results.xml").is_file():
+            print("Sandbox test process produced no JUnit artifact", flush=True)
+            return result.returncode
         shutil.copyfile("/tmp/results.xml", results / "results.xml")
-        shutil.copyfile("/tmp/coverage.json", results / "coverage.json")
-        # Keep the bounded result tmpfs mounted while the worker copies the artifacts.
+        (results / "results.xml").chmod(0o444)
+        if Path("/tmp/coverage.json").is_file():
+            shutil.copyfile("/tmp/coverage.json", results / "coverage.json")
+            (results / "coverage.json").chmod(0o444)
+        else:
+            print("Sandbox coverage artifact unavailable", flush=True)
+        results.chmod(0o555)
+        print(
+            "Sandbox result artifacts prepared:",
+            sorted(path.name for path in results.iterdir()),
+            flush=True,
+        )
+        print(
+            "Sandbox result artifacts prepared:",
+            sorted(path.name for path in results.iterdir()),
+            flush=True,
+        )
+        # Keep the results tmpfs mounted until the host supervisor copies it.
         time.sleep(8)
     return result.returncode
 
