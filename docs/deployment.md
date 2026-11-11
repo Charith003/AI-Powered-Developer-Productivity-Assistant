@@ -25,7 +25,7 @@ The worker checks Docker's local `RepoDigests` for that repository digest and st
 
 ## Docker-enabled verification
 
-The `Sandbox verification` workflow runs on pull requests and manual dispatch using an Ubuntu runner with Docker Engine and a PostgreSQL 16 service. It builds the image, pushes it to a temporary local registry to obtain a real immutable repository digest, verifies image metadata, applies the complete migration chain and an upgrade from revision `0004_test_generation`, then runs backend regression tests, live container probes and real PostgreSQL worker tests. Sanitized JUnit, lifecycle logs, image configuration and digest evidence are uploaded for 14 days. Mandatory integration test failures fail the workflow; the tests are not silently skipped in this job.
+The `Sandbox verification` workflow runs on pull requests and manual dispatch. It separates PostgreSQL migration checks, live Docker sandbox checks, PostgreSQL worker integration, and backend/frontend checks into independent jobs. The two Docker jobs each rebuild the image, push to a temporary local registry, verify the immutable RepoDigest and run their live test suite. A final aggregation job requires every suite to succeed. Sanitized JUnit, runtime logs, image configuration and digest evidence are uploaded for 14 days. A failure in one suite does not prevent the other independent suites from producing evidence.
 
 Manual equivalent after configuring Docker, PostgreSQL and the digest:
 

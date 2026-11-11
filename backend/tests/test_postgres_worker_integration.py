@@ -10,17 +10,20 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.database import SessionLocal
+from app.main import app
 from app.models import (
     TestCaseResult as CaseRecord,
 )
 from app.models import (
     TestExecution as ExecutionRecord,
 )
+from app.models import TestExecutionEvent as ExecutionEventRecord
 from app.models import (
     TestGeneration as GenerationRecord,
 )
@@ -29,6 +32,7 @@ from app.models import (
 )
 from app.test_generation.sandbox.runner import DockerSandbox
 from app.test_generation.sandbox.worker import execute_one, recover_stale_jobs
+from app.security import create_access_token
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DEVPILOT_POSTGRES_INTEGRATION") != "1",
@@ -40,6 +44,7 @@ def create_job(
     session,
     *,
     test_code,
+    queue=True,
     source="def choose(value):\n    if value > 0:\n        return 'up'\n    return 'down'\n",
 ):
     user = User(
@@ -67,17 +72,19 @@ def create_job(
     )
     session.add(generation)
     session.flush()
-    execution = ExecutionRecord(
-        generation_id=generation.id,
-        user_id=user.id,
-        test_code_snapshot=test_code,
-        source_sha256=hashlib.sha256(source.encode()).hexdigest(),
-        test_sha256=hashlib.sha256(test_code.encode()).hexdigest(),
-        execution_status="queued",
-    )
-    session.add(execution)
-    session.flush()
-    return user.id, generation.id, execution.id
+    execution = None
+    if queue:
+        execution = ExecutionRecord(
+            generation_id=generation.id,
+            user_id=user.id,
+            test_code_snapshot=test_code,
+            source_sha256=hashlib.sha256(source.encode()).hexdigest(),
+            test_sha256=hashlib.sha256(test_code.encode()).hexdigest(),
+            execution_status="queued",
+        )
+        session.add(execution)
+        session.flush()
+    return user.id, generation.id, execution.id if execution else None
 
 
 def cleanup(session, user_ids):
@@ -105,6 +112,7 @@ def test_postgres_worker_persists_real_results_and_coverage():
     try:
         user_id, generation_id, execution_id = create_job(
             db,
+            queue=False,
             test_code="""import math_ops
 def test_positive(): assert math_ops.choose(2) == "up"
 def test_zero(): assert math_ops.choose(0) == "down"
@@ -112,6 +120,46 @@ def test_zero(): assert math_ops.choose(0) == "down"
         )
         user_ids.append(user_id)
         db.commit()
+
+        outsider = User(
+            email=f"sandbox-outsider-{uuid.uuid4()}@example.test",
+            full_name="Not the generation owner",
+            password_hash="not-used",
+        )
+        db.add(outsider)
+        db.commit()
+        user_ids.append(outsider.id)
+
+        with TestClient(app) as client:
+            owner_token, _ = create_access_token(user_id)
+            outsider_token, _ = create_access_token(outsider.id)
+            endpoint = f"/api/v1/tests/{generation_id}/execute"
+            forbidden = client.post(
+                endpoint, headers={"Authorization": f"Bearer {outsider_token}"}
+            )
+            assert forbidden.status_code == 404
+
+            submitted = client.post(
+                endpoint, headers={"Authorization": f"Bearer {owner_token}"}
+            )
+            assert submitted.status_code == 202, submitted.text
+            execution_id = submitted.json()["id"]
+            assert submitted.json()["execution_status"] == "queued"
+
+            repeated = client.post(
+                endpoint, headers={"Authorization": f"Bearer {owner_token}"}
+            )
+            assert repeated.status_code == 202, repeated.text
+            assert repeated.json()["id"] == execution_id
+
+        queued_event = db.scalar(
+            select(ExecutionEventRecord).where(
+                ExecutionEventRecord.execution_id == execution_id,
+                ExecutionEventRecord.event_type == "execution_queued",
+            )
+        )
+        assert queued_event is not None
+
         savepoint = db.begin_nested()
         try:
             db.add(
