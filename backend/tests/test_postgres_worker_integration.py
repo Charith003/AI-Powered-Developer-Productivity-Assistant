@@ -134,21 +134,15 @@ def test_zero(): assert math_ops.choose(0) == "down"
             owner_token, _ = create_access_token(user_id)
             outsider_token, _ = create_access_token(outsider.id)
             endpoint = f"/api/v1/tests/{generation_id}/execute"
-            forbidden = client.post(
-                endpoint, headers={"Authorization": f"Bearer {outsider_token}"}
-            )
+            forbidden = client.post(endpoint, headers={"Authorization": f"Bearer {outsider_token}"})
             assert forbidden.status_code == 404
 
-            submitted = client.post(
-                endpoint, headers={"Authorization": f"Bearer {owner_token}"}
-            )
+            submitted = client.post(endpoint, headers={"Authorization": f"Bearer {owner_token}"})
             assert submitted.status_code == 202, submitted.text
             execution_id = submitted.json()["id"]
             assert submitted.json()["execution_status"] == "queued"
 
-            repeated = client.post(
-                endpoint, headers={"Authorization": f"Bearer {owner_token}"}
-            )
+            repeated = client.post(endpoint, headers={"Authorization": f"Bearer {owner_token}"})
             assert repeated.status_code == 202, repeated.text
             assert repeated.json()["id"] == execution_id
 

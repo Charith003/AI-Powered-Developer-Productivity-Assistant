@@ -390,6 +390,11 @@ class DockerSandbox:
                     or "Unable to find image" in err
                     or "Cannot connect to the Docker daemon" in err
                 ):
+                    logger.warning(
+                        "Docker sandbox launch failed with exit %s: %s",
+                        process.returncode,
+                        err.strip()[:500],
+                    )
                     result = SandboxResult(
                         "infrastructure_failure",
                         process.returncode,
