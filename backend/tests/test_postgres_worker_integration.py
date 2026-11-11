@@ -30,9 +30,9 @@ from app.models import (
 from app.models import (
     User,
 )
+from app.security import create_access_token
 from app.test_generation.sandbox.runner import DockerSandbox
 from app.test_generation.sandbox.worker import execute_one, recover_stale_jobs
-from app.security import create_access_token
 
 pytestmark = pytest.mark.skipif(
     os.getenv("DEVPILOT_POSTGRES_INTEGRATION") != "1",

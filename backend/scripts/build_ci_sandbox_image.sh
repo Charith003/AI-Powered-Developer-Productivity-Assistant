@@ -43,17 +43,19 @@ digest="$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' \
   "$evidence_dir/${job_name}-image-push.log" | tail -n 1)"
 test -n "$digest"
 image="${image_tag}@${digest}"
+repository_digest="${image_tag%:*}@${digest}"
 docker pull "$image"
 docker image inspect --format '{{json .RepoDigests}}' "$image" \
   | tee "$evidence_dir/${job_name}-image-repodigests.json"
-python - "$image" "$digest" "$evidence_dir/${job_name}-image-repodigests.json" <<'PY'
+python - "$image" "$repository_digest" "$digest" \
+  "$evidence_dir/${job_name}-image-repodigests.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-image, digest, evidence_path = sys.argv[1:]
+image, repository_digest, digest, evidence_path = sys.argv[1:]
 repo_digests = json.loads(Path(evidence_path).read_text(encoding="utf-8"))
-assert image in repo_digests, repo_digests
+assert repository_digest in repo_digests, repo_digests
 assert image.endswith("@" + digest), image
 PY
 printf '%s\n' "$image" | tee "$evidence_dir/${job_name}-image-reference.txt"
