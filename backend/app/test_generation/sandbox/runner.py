@@ -473,11 +473,7 @@ class DockerSandbox:
 
     def _read_artifact(self, path: Path) -> str:
         resolved = path.resolve()
-        if (
-            path.is_symlink()
-            or resolved.parent != path.parent.resolve()
-            or not path.is_file()
-        ):
+        if path.is_symlink() or resolved.parent != path.parent.resolve() or not path.is_file():
             raise OSError("Unsafe or unavailable sandbox artifact")
         if path.stat().st_size > self.settings.test_sandbox_output_bytes:
             raise OSError("Sandbox artifact exceeded the configured output limit")
