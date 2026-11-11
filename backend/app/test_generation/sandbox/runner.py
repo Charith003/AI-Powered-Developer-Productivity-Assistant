@@ -465,21 +465,29 @@ class DockerSandbox:
                     copied = subprocess.run(
                         [
                             self.docker_path or "docker",
-                            "cp",
-                            f"{name}:/results/{filename}",
-                            str(target / filename),
+                            "exec",
+                            "--user",
+                            "0",
+                            name,
+                            "cat",
+                            f"/results/{filename}",
                         ],
                         stdin=subprocess.DEVNULL,
                         capture_output=True,
-                        text=True,
                         timeout=2,
                         check=False,
                         shell=False,
                     )
-                    if copied.returncode == 0 and (target / filename).is_file():
-                        pending.remove(filename)
+                    if copied.returncode == 0:
+                        if len(copied.stdout) > self.settings.test_sandbox_output_bytes:
+                            last_errors[filename] = "artifact exceeded the configured output limit"
+                        else:
+                            (target / filename).write_bytes(copied.stdout)
+                            pending.remove(filename)
                     else:
-                        last_errors[filename] = copied.stderr.strip()[:300]
+                        last_errors[filename] = (
+                            copied.stderr.decode("utf-8", "replace").strip()[:300]
+                        )
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     last_errors[filename] = str(exc)[:300]
             if pending:
