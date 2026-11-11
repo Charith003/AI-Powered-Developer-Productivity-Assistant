@@ -317,7 +317,12 @@ def test_process_limit():
         pids=16,
         timeout=15,
     )
-    assert result.status == "completed" and result.exit_code == 0
+    assert result.status == "completed" and result.exit_code == 0, (
+        result.status,
+        result.message,
+        result.stdout[-1000:],
+        result.stderr[-1000:],
+    )
     assert parse_junit(result.junit_xml)[0]["status"] == "passed"
 
 
@@ -364,7 +369,12 @@ def test_container_boundaries():
         raise AssertionError(f"unexpected network access to {{host}}:{{port}}")
 '''
         _, result = run_case("def choose(value): return value\n", tests, timeout=15)
-        assert result.status == "completed" and result.exit_code == 0
+        assert result.status == "completed" and result.exit_code == 0, (
+            result.status,
+            result.message,
+            result.stdout[-1000:],
+            result.stderr[-1000:],
+        )
         assert parse_junit(result.junit_xml)[0]["status"] == "passed"
     finally:
         marker.unlink(missing_ok=True)
