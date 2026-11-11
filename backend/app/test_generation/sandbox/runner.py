@@ -326,6 +326,15 @@ class DockerSandbox:
         ]
         for thread in threads:
             thread.start()
+        artifact_done = threading.Event()
+        artifact_thread = None
+        if "--collect-only" not in argv:
+            artifact_thread = threading.Thread(
+                target=self._copy_artifacts_while_running,
+                args=(argv, artifacts_root, artifact_done),
+                daemon=True,
+            )
+            artifact_thread.start()
         outcome = None
         deadline = started + self.settings.test_sandbox_timeout_seconds
         result = SandboxResult(
@@ -391,8 +400,6 @@ class DockerSandbox:
                     )
                 else:
                     result = SandboxResult("completed", process.returncode, stdout=out, stderr=err)
-                    if "--collect-only" not in argv:
-                        self._copy_artifacts(argv, artifacts_root)
         except Exception as exc:  # noqa: BLE001 - supervisor failures must terminate and clean the container
             try:
                 process.kill()
@@ -406,6 +413,9 @@ class DockerSandbox:
                 message=f"Sandbox supervisor failed: {type(exc).__name__}",
             )
         finally:
+            artifact_done.set()
+            if artifact_thread:
+                artifact_thread.join(timeout=5)
             for thread in threads:
                 thread.join(timeout=1)
             container_name = argv[argv.index("--name") + 1]
@@ -443,33 +453,43 @@ class DockerSandbox:
             )
         return result
 
-    def _copy_artifacts(self, argv: list[str], target: Path) -> None:
+    def _copy_artifacts_while_running(
+        self, argv: list[str], target: Path, done: threading.Event
+    ) -> None:
         name = argv[argv.index("--name") + 1]
-        for filename in ("results.xml", "coverage.json"):
-            try:
-                copied = subprocess.run(
-                    [
-                        self.docker_path or "docker",
-                        "cp",
-                        f"{name}:/results/{filename}",
-                        str(target / filename),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                    shell=False,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                logger.warning("Could not retrieve sandbox artifact %s: %s", filename, exc)
-                continue
-            if copied.returncode != 0 or not (target / filename).is_file():
-                logger.warning(
-                    "Could not retrieve sandbox artifact %s: %s",
-                    filename,
-                    copied.stderr.strip()[:300],
-                )
+        pending = {"results.xml", "coverage.json"}
+        last_errors = {}
+        while pending and not done.is_set():
+            for filename in tuple(pending):
+                try:
+                    copied = subprocess.run(
+                        [
+                            self.docker_path or "docker",
+                            "cp",
+                            f"{name}:/results/{filename}",
+                            str(target / filename),
+                        ],
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                        shell=False,
+                    )
+                    if copied.returncode == 0 and (target / filename).is_file():
+                        pending.remove(filename)
+                    else:
+                        last_errors[filename] = copied.stderr.strip()[:300]
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    last_errors[filename] = str(exc)[:300]
+            if pending:
+                time.sleep(0.25)
+        for filename in pending:
+            logger.warning(
+                "Could not retrieve sandbox artifact %s before container cleanup: %s",
+                filename,
+                last_errors.get(filename, "artifact was not available"),
+            )
 
     def _read_artifact(self, path: Path) -> str:
         resolved = path.resolve()
