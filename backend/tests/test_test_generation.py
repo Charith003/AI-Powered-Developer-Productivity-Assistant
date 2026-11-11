@@ -98,7 +98,8 @@ def test_docker_sandbox_command_has_required_isolation_flags(tmp_path):
     assert (
         argv[argv.index("--user") + 1] == "0:0"
     )  # trusted bootstrap drops privileges before pytest
-    assert argv[argv.index("--pid") + 1] == "private"
+    # Docker defaults to a private PID namespace; `--pid private` is invalid.
+    assert "--pid" not in argv and "--pid=host" not in argv
     assert argv[argv.index("--ipc") + 1] == "private"
     assert "seccomp=unconfined" not in argv
     assert {"--cap-add=SETUID", "--cap-add=SETGID", "--cap-add=KILL"} <= set(argv)

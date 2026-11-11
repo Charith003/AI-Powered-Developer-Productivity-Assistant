@@ -172,7 +172,11 @@ def test_zero(): assert math_ops.choose(0) == "down"
             savepoint.rollback()
         execution = execute_one(db, DockerSandbox(settings))
         assert execution.id == execution_id
-        assert execution and execution.execution_status == "completed"
+        assert execution and execution.execution_status == "completed", (
+            execution.infrastructure_message,
+            execution.stdout[-1000:],
+            execution.stderr[-1000:],
+        )
         assert (execution.total_tests, execution.passed_tests, execution.failed_tests) == (2, 2, 0)
         assert execution.line_coverage is not None and execution.branch_coverage is not None
         assert execution.coverage_artifact

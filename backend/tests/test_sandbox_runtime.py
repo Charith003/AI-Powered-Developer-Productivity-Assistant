@@ -87,7 +87,9 @@ def test_skipped():
     assert False
 """
     _runner, result = run_case(source, tests)
-    assert result.status == "completed", result.message
+    assert result.status == "completed", (
+        f"{result.message}; stdout={result.stdout[-1000:]!r}; stderr={result.stderr[-1000:]!r}"
+    )
     cases = parse_junit(result.junit_xml)
     assert [row["status"] for row in cases] == ["passed", "passed", "skipped"]
     coverage = parse_coverage_from_text(result.coverage_json)
