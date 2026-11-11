@@ -176,8 +176,6 @@ class DockerSandbox:
             "none",
             "--memory",
             self.settings.test_sandbox_memory,
-            "--pid",
-            "private",
             "--ipc",
             "private",
             "--memory-swap",

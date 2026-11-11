@@ -373,7 +373,9 @@ def test_container_uses_private_pid_and_ipc_and_default_seccomp():
     argv = runner.command(
         Path("/tmp/inputs"), "devpilot-tests-policy", "math_ops.py", "math_ops", True
     )
-    assert argv[argv.index("--pid") + 1] == "private"
+    # Docker's default is a private PID namespace; `--pid private` is invalid.
+    assert "--pid" not in argv
+    assert "--pid=host" not in argv
     assert argv[argv.index("--ipc") + 1] == "private"
     assert "--privileged" not in argv and "--network=host" not in argv
     assert "seccomp=unconfined" not in argv
