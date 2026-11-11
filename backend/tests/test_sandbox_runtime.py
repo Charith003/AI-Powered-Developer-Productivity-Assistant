@@ -274,13 +274,9 @@ def test_real_memory_limit_is_enforced():
         memory="128m",
         timeout=15,
     )
-    assert result.status == "completed" and result.exit_code != 0, (
-        result.status,
-        result.message,
-        result.stdout[-1000:],
-        result.stderr[-1000:],
-    )
-    assert parse_junit(result.junit_xml)[0]["status"] == "failed"
+    assert result.status == "infrastructure_failure"
+    assert result.exit_code == 137
+    assert result.cleanup_confirmed is True
 
 
 def test_real_process_limit_is_enforced():
