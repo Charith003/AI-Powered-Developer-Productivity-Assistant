@@ -72,6 +72,9 @@ def main():
         kill_leftover_test_processes()
         shutil.copyfile("/tmp/results.xml", results / "results.xml")
         shutil.copyfile("/tmp/coverage.json", results / "coverage.json")
+        (results / "results.xml").chmod(0o444)
+        (results / "coverage.json").chmod(0o444)
+        results.chmod(0o555)
         print(
             "Sandbox result artifacts prepared:",
             sorted(path.name for path in results.iterdir()),
