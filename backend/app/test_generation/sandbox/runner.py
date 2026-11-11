@@ -498,4 +498,3 @@ class DockerSandbox:
         if path.stat().st_size > self.settings.test_sandbox_output_bytes:
             raise OSError("Sandbox artifact exceeded the configured output limit")
         return path.read_text(encoding="utf-8")
-
