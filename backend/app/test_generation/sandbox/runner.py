@@ -201,7 +201,7 @@ class DockerSandbox:
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,nodev,size=32m,nr_inodes=2048",
             "--tmpfs",
-            "/workspace:rw,noexec,nosuid,nodev,size=64m,nr_inodes=4096",
+            "/workspace:rw,noexec,nosuid,nodev,size=64m,nr_inodes=4096,mode=1777",
             "--tmpfs",
             "/results:rw,noexec,nosuid,nodev,size=16m,nr_inodes=2048",
             "--mount",
@@ -489,3 +489,4 @@ class DockerSandbox:
         if path.stat().st_size > self.settings.test_sandbox_output_bytes:
             raise OSError("Sandbox artifact exceeded the configured output limit")
         return path.read_text(encoding="utf-8")
+
