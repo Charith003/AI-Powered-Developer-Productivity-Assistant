@@ -7,7 +7,6 @@ import signal
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -72,8 +71,6 @@ def main():
         kill_leftover_test_processes()
         shutil.copyfile("/tmp/results.xml", results / "results.xml")
         shutil.copyfile("/tmp/coverage.json", results / "coverage.json")
-        # Keep the bounded result tmpfs mounted while the worker copies the artifacts.
-        time.sleep(8)
     return result.returncode
 
 
