@@ -49,6 +49,10 @@ def main():
     (work / source.parent).mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source_in, work / source)
     shutil.copyfile("/inputs/test_generated.py", work / "test_generated.py")
+    # Docker's tmpfs mount hides the image's ownership. Pytest and coverage run
+    # after dropping to uid 10001, so give that uid the bounded workspace.
+    os.chown(work, 10001, 10001)
+    work.chmod(0o700)
     results = Path("/results")
     results.chmod(0o700)
     source_parent = "." if source.parent == Path(".") else str(source.parent)
@@ -76,3 +80,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
