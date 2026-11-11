@@ -68,8 +68,16 @@ def main():
         ])
     env = {"PATH": os.environ.get("PATH", ""), "HOME": "/tmp", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": f"/workspace/{source_parent}"}
     result = subprocess.run(command, cwd=work, env=env, stdin=subprocess.DEVNULL, shell=False, check=False, preexec_fn=drop_test_privileges)
+    if result.returncode < 0:
+        kill_leftover_test_processes()
+        signal_number = -result.returncode
+        print(f"Sandbox test process terminated by signal {signal_number}", flush=True)
+        return 128 + signal_number
     if not args.collect_only:
         kill_leftover_test_processes()
+        if not Path("/tmp/results.xml").is_file():
+            print("Sandbox test process produced no JUnit artifact", flush=True)
+            return result.returncode
         shutil.copyfile("/tmp/results.xml", results / "results.xml")
         (results / "results.xml").chmod(0o444)
         if Path("/tmp/coverage.json").is_file():
