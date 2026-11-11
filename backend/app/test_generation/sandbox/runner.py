@@ -118,10 +118,14 @@ class DockerSandbox:
                 return execution
             try:
                 execution.junit_xml = self._read_artifact(artifacts_root / "results.xml")
-                execution.coverage_json = self._read_artifact(artifacts_root / "coverage.json")
             except OSError:
                 execution.status = "infrastructure_failure"
                 execution.message = "Sandbox completed without required result artifacts"
+                return execution
+            try:
+                execution.coverage_json = self._read_artifact(artifacts_root / "coverage.json")
+            except OSError:
+                logger.warning("Sandbox did not produce a coverage artifact")
             return execution
 
     def verify_image_digest(self) -> bool:
