@@ -485,9 +485,9 @@ class DockerSandbox:
                             (target / filename).write_bytes(copied.stdout)
                             pending.remove(filename)
                     else:
-                        last_errors[filename] = (
-                            copied.stderr.decode("utf-8", "replace").strip()[:300]
-                        )
+                        last_errors[filename] = copied.stderr.decode("utf-8", "replace").strip()[
+                            :300
+                        ]
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     last_errors[filename] = str(exc)[:300]
             if pending:
