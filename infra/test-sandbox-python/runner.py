@@ -72,6 +72,16 @@ def main():
         kill_leftover_test_processes()
         shutil.copyfile("/tmp/results.xml", results / "results.xml")
         shutil.copyfile("/tmp/coverage.json", results / "coverage.json")
+        print(
+            "Sandbox result artifacts prepared:",
+            sorted(path.name for path in results.iterdir()),
+            flush=True,
+        )
+        print(
+            "Sandbox result artifacts prepared:",
+            sorted(path.name for path in results.iterdir()),
+            flush=True,
+        )
         # Keep the results tmpfs mounted until the host supervisor copies it.
         time.sleep(8)
     return result.returncode
