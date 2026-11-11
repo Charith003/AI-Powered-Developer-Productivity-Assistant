@@ -1,0 +1,20 @@
+# Security
+
+- Passwords use Argon2id. Access tokens are short-lived; refresh token identifiers are persisted, rotated, and revocable.
+- Browser tokens are held in HttpOnly, SameSite cookies by the same-origin Next.js BFF. Mutating proxy requests validate Origin; protected pages require a valid session.
+- Every project and AI usage query is scoped to the authenticated owner. Optional project IDs are checked for ownership before generation or filtering.
+- OpenAI credentials remain backend-only. Provider calls disable response storage (`store=false`). Prompts/completions are not persisted in application usage rows or logged. Provider exceptions are normalized without exposing raw details or credentials.
+- Configure `JWT_SECRET`, `OPENAI_API_KEY`, and database credentials through deployment secrets, never source control. Use PostgreSQL in production; production startup rejects SQLite.
+- Configure model pricing explicitly; reported costs are estimates. Rate limits, request timeouts, bounded retries, and output/token limits reduce runaway usage. Apply provider/account quotas operationally.
+
+## Review-specific controls and residual risks
+- Source paths are normalized and reject absolute paths, `..`, duplicate names, credential/environment files, binary NUL bytes, unsupported extensions, more than 10 files, and size limits. Analyzer commands use argument arrays with `shell=False`, a temporary directory, a 10-second timeout, bounded output, and no stdin. Submitted program code is not executed.
+- Likely credential strings are redacted before AI calls and from persisted findings. Patch generation is disabled for a file when the redaction detector recognizes a credential. Detection is heuristic; users must avoid submitting secrets. Uploaded source snapshots are stored as plaintext in the configured database to support reviews and patch application; secure database access, backups, and at-rest encryption are deployment responsibilities.
+- AI output is constrained by Pydantic schemas. Findings are discarded unless file path, line range, and quoted evidence match the redacted source. This reduces fabricated locations but does not prove an observation is correct.
+- Analyzer subprocesses are not yet OS/container sandboxes and have no explicit memory/CPU quotas or network isolation. Fixed commands and time/output limits reduce exposure but do not eliminate analyzer vulnerabilities or resource abuse. Production should run review jobs in a restricted worker/container before accepting hostile multi-tenant source at scale.
+- Patch application mutates only the stored uploaded-source copy, not a repository checkout or host path. The API requires explicit approval, verifies the source hash/path and records audit events; rollback restores the prior snapshot only if the applied hash still matches.
+
+## Test execution controls and limitations
+- See [execution security](execution-security.md) for the threat model and deployment policy. API requests only create database jobs; generated tests run in a separate worker and a digest-pinned, no-network container with non-root user, read-only base, dropped capabilities, no-new-privileges, CPU/memory/PID/time/output and tmpfs limits.
+- Test input bind mounts are read-only and temporary. No application secrets, backend paths, arbitrary user image, user command, or Docker socket is mounted into the test container. No in-process host fallback exists.
+- Digest verification, Docker controls, running cancellation requests, stale-job reconciliation, execution idempotency and sanitized lifecycle audit events are implemented in code but were not runtime-verified because Docker is unavailable in this environment. A Docker/PostgreSQL GitHub Actions workflow and live probes have been added, but it has not run. Docker shares the host kernel and is not a complete security boundary. Use a dedicated worker host and evaluate gVisor/Firecracker before hostile multi-tenant execution. JavaScript/TypeScript execution is not implemented.

@@ -1,0 +1,12 @@
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/.env
+frontend/.env.local
+backend/.env
+backend/.venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/devpilot.db
+.env
+.git/

@@ -1,0 +1,132 @@
+name: Sandbox verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-and-postgres:
+    name: Docker sandbox and PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: devpilot
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: devpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devpilot -d devpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://devpilot:ci-only-password@localhost:5432/devpilot
+      JWT_SECRET: ci-only-jwt-secret-with-more-than-thirty-two-characters
+      DEVPILOT_SANDBOX_RUNTIME: "1"
+      DEVPILOT_POSTGRES_INTEGRATION: "1"
+      SANDBOX_EVIDENCE_DIR: ${{ github.workspace }}/sandbox-evidence
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Verify Docker and PostgreSQL services
+        run: |
+          docker version
+          docker info
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+
+      - name: Start an isolated local image registry
+        run: |
+          docker run --detach --name devpilot-ci-registry --publish 5000:5000 registry:2.8.3
+          for attempt in {1..30}; do curl --fail --silent http://localhost:5000/v2/ && exit 0; sleep 1; done
+          exit 1
+
+      - name: Build, inspect, and digest-pin sandbox image
+        run: |
+          set -euo pipefail
+          mkdir -p sandbox-evidence
+          docker build --pull --tag localhost:5000/devpilot/test-sandbox-python:ci \
+            --file infra/test-sandbox-python/Dockerfile infra/test-sandbox-python
+          docker image inspect --format '{{json .Config}}' localhost:5000/devpilot/test-sandbox-python:ci \
+            > sandbox-evidence/image-config.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("sandbox-evidence/image-config.json").read_text())
+          assert config.get("User") == "10001:10001", config.get("User")
+          assert "/workspace" == config.get("WorkingDir"), config.get("WorkingDir")
+          PY
+          docker push localhost:5000/devpilot/test-sandbox-python:ci 2>&1 | tee sandbox-evidence/image-push.log
+          digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' sandbox-evidence/image-push.log | tail -n 1)
+          test -n "$digest"
+          image="localhost:5000/devpilot/test-sandbox-python:ci@$digest"
+          docker pull "$image"
+          docker image inspect --format '{{json .RepoDigests}}' "$image" | tee sandbox-evidence/image-repodigests.json
+          echo "$image" > sandbox-evidence/image-reference.txt
+          echo "TEST_SANDBOX_IMAGE=$image" >> "$GITHUB_ENV"
+          echo "SANDBOX_IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+
+      - name: Upgrade PostgreSQL schema from fresh database
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Verify PostgreSQL upgrade from the previous schema revision
+        working-directory: backend
+        run: python -m alembic downgrade 0004_test_generation && python -m alembic upgrade head
+
+      - name: Verify PostgreSQL migration with duplicate active legacy jobs
+        working-directory: backend
+        run: python scripts/verify_legacy_postgres_upgrade.py
+
+      - name: Run SQLite unit and regression suite
+        working-directory: backend
+        env:
+          DEVPILOT_SANDBOX_RUNTIME: "0"
+          DEVPILOT_POSTGRES_INTEGRATION: "0"
+        run: python -m pytest -q --junitxml=../sandbox-evidence/backend-unit.xml
+
+      - name: Run real Docker scenarios and PostgreSQL worker integration
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python -m pytest -q -s tests/test_sandbox_runtime.py tests/test_postgres_worker_integration.py \
+            --junitxml=../sandbox-evidence/sandbox-postgres-integration.xml \
+            | tee ../sandbox-evidence/sandbox-postgres-integration.log
+
+      - name: Write verification summary
+        if: always()
+        run: |
+          {
+            echo "## Sandbox verification"
+            echo "- Image reference: \`${TEST_SANDBOX_IMAGE:-not built}\`"
+            echo "- Immutable digest: \`${SANDBOX_IMAGE_DIGEST:-not recorded}\`"
+            echo "- Docker runtime: $([[ -n "$(docker info 2>/dev/null)" ]] && echo available || echo unavailable)"
+            echo "- PostgreSQL worker and live sandbox suite result: ${{ job.status }}"
+            echo "- JUnit and image evidence are attached as sanitized workflow artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-verification-${{ github.run_id }}
+          path: sandbox-evidence/
+          if-no-files-found: warn
+          retention-days: 14
