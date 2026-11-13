@@ -1,4 +1,4 @@
-# DevPilot AI
+# Agentic AI Powered Developer Productivity and Code Engineering Platform
 
 Engineering intelligence workspace for evidence-backed code review, tests, debugging and technical knowledge workflows.
 
